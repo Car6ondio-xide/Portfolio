@@ -1,3 +1,4 @@
+import time
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -52,6 +53,7 @@ def purchase_ticket(request: PurchaseRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="申し訳ありません。チケットは売り切れました。")
 
     # 3. 在庫を減らしてデータベースに保存（コミット）
+    time.sleep(1)
     ticket.stock -= 1
     db.commit()      # 変更内容を確定して保存
     db.refresh(ticket) # 最新の状態にデータを更新
