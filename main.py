@@ -3,6 +3,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import models
 from database import engine, get_db
+import redis
+
+r = redis.Redis(host="localhost", port = 6379, db = 0, decode_responses = True)
 
 # データベースのテーブルを作成（存在しない場合のみ作成されます）
 models.Base.metadata.create_all(bind=engine)
@@ -56,8 +59,25 @@ def purchase_ticket(request: PurchaseRequest, db: Session = Depends(get_db)):
     db.commit()      # 変更内容を確定して保存
     db.refresh(ticket) # 最新の状態にデータを更新
 
+    key = "limit:purchase"
+    current_requests = r.get(key)
+
+    if current_requests and int(current_requests) >= 3:
+        raise HTTPException(
+                status_code = 429,
+                detail = "リクエストが多すぎます。しばらく時間を置いてから再度お試しください。"
+                )
+
+    if not current_requests:
+        r.set(key, 1, ex=10)
+    else:
+        r.incr(key)
+
+    ticket = db.query(models.Ticket).filter(models.Ticket.id == request.ticket_id).with_for_update().first()
+
     return {
         "message": "チケットの購入が完了しました！(SQLite)",
         "ticket_name": ticket.name,
         "remaining_stock": ticket.stock
     }
+
