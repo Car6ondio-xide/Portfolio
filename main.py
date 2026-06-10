@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import models
@@ -36,30 +36,18 @@ class PurchaseRequest(BaseModel):
 @app.get("/tickets")
 def get_tickets(db: Session = Depends(get_db)):
     """データベースからチケット一覧と在庫状況を取得します"""
-    # SELECT * FROM tickets; を実行するのと同等
     tickets = db.query(models.Ticket).all()
     return tickets
 
 @app.post("/tickets/purchase")
-def purchase_ticket(request: PurchaseRequest, db: Session = Depends(get_db)):
-    """データベースからチケットを購入し、在庫を減らします"""
-    # 1. データベースから指定されたIDのチケットを検索
-    # SELECT * FROM tickets WHERE id = ticket_id LIMIT 1;
-    ticket = db.query(models.Ticket).filter(models.Ticket.id == request.ticket_id).with_for_update().first()
+def purchase_ticket(
+        request: PurchaseRequest, 
+        request_info: Request,
+        db: Session = Depends(get_db),
+):
+    ip_address = request_info.client.host
+    key = f"limit:purchase{ip_address}"
 
-    if not ticket:
-        raise HTTPException(status_code=404, detail="指定されたチケットが見つかりません。")
-
-    # 2. 在庫を確認
-    if ticket.stock <= 0:
-        raise HTTPException(status_code=400, detail="申し訳ありません。チケットは売り切れました。")
-
-    # 3. 在庫を減らしてデータベースに保存（コミット）
-    ticket.stock -= 1
-    db.commit()      # 変更内容を確定して保存
-    db.refresh(ticket) # 最新の状態にデータを更新
-
-    key = "limit:purchase"
     current_requests = r.get(key)
 
     if current_requests and int(current_requests) >= 3:
@@ -73,7 +61,20 @@ def purchase_ticket(request: PurchaseRequest, db: Session = Depends(get_db)):
     else:
         r.incr(key)
 
+    """データベースからチケットを購入し、在庫を減らします"""
     ticket = db.query(models.Ticket).filter(models.Ticket.id == request.ticket_id).with_for_update().first()
+
+    if not ticket:
+        raise HTTPException(status_code=404, detail="指定されたチケットが見つかりません。")
+
+    # 2. 在庫を確認
+    if ticket.stock <= 0:
+        raise HTTPException(status_code=400, detail="申し訳ありません。チケットは売り切れました。")
+
+    # 3. 在庫を減らしてデータベースに保存（コミット）
+    ticket.stock -= 1
+    db.commit()      # 変更内容を確定して保存
+    db.refresh(ticket) # 最新の状態にデータを更新
 
     return {
         "message": "チケットの購入が完了しました！(SQLite)",
